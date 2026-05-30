@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Feed - Social Network</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div id="nav-placeholder"></div>
+
+    <div class="container-wide">
+      <h1 style="margin:0 0 1rem;font-size:1.35rem">Home</h1>
+
+      <nav class="feed-tabs" aria-label="Home sections">
+        <button type="button" class="feed-tab active" id="tabFeed" data-tab="feed">Following</button>
+        <button type="button" class="feed-tab" id="tabRecs" data-tab="recs">For You</button>
+      </nav>
+
+      <section id="pageFeed" class="feed-page active" aria-labelledby="tabFeed">
+        <div class="card" style="margin-bottom: 1rem">
+          <h2 style="margin-top: 0">New post</h2>
+          <form id="postForm">
+            <label for="content">Content (you can use #hashtags)</label>
+            <textarea id="content" name="content" maxlength="500" required placeholder="e.g. New #technology update..."></textarea>
+            <label for="image">Image (optional, JPEG/PNG, max 5MB)</label>
+            <input id="image" name="image" type="file" accept="image/jpeg,image/png" />
+            <button type="submit" class="btn btn-primary">Post</button>
+          </form>
+          <div id="postAlert" class="alert hidden" style="margin-top: 1rem"></div>
+        </div>
+
+        <div class="section-header">
+          <h2 class="section-title" style="margin:0">Following feed</h2>
+          <button type="button" class="btn btn-secondary btn-sm" id="refreshFeedBtn">Refresh</button>
+        </div>
+        <p class="feed-hint">Posts from people you follow, newest first.</p>
+        <div id="feedList"></div>
+      </section>
+
+      <section id="pageRecs" class="feed-page" aria-labelledby="tabRecs" hidden>
+        <div class="section-header">
+          <h2 class="section-title" style="margin:0">Recommended for you</h2>
+          <button type="button" class="btn btn-primary btn-sm" id="refreshRecsBtn">Refresh</button>
+        </div>
+        <div id="recommendList"></div>
+        <div id="emptyHint" class="alert hidden" style="margin-top:1rem"></div>
+      </section>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/seen.js"></script>
+    <script src="/js/posts.js"></script>
+    <script>
+      requireAuth();
+      mountNav('feed');
+
+      let refreshSeed = Date.now();
+      let activeTab = 'feed';
+      let feedLoaded = false;
+      let recsLoaded = false;
+
+      const TAB_KEY = 'social_network_feed_tab';
+      const FIRST_VISIT_KEY = 'social_network_feed_first_visit';
+
+      function showEmptyHint(msg) {
+        const el = document.getElementById('emptyHint');
+        el.textContent = msg;
+        el.className = 'alert alert-success';
+        el.classList.remove('hidden');
+      }
+
+      function hideEmptyHint() {
+        document.getElementById('emptyHint').classList.add('hidden');
+      }
+
+      function applyTabUI(tab) {
+        activeTab = tab === 'recs' ? 'recs' : 'feed';
+        sessionStorage.setItem(TAB_KEY, activeTab);
+
+        document.getElementById('tabFeed').classList.toggle('active', activeTab === 'feed');
+        document.getElementById('tabRecs').classList.toggle('active', activeTab === 'recs');
+
+        const pageFeed = document.getElementById('pageFeed');
+        const pageRecs = document.getElementById('pageRecs');
+        const isFeed = activeTab === 'feed';
+
+        pageFeed.classList.toggle('active', isFeed);
+        pageFeed.hidden = !isFeed;
+        pageRecs.classList.toggle('active', !isFeed);
+        pageRecs.hidden = isFeed;
+      }
+
+      function switchTab(tab) {
+        applyTabUI(tab);
+
+        if (activeTab === 'feed' && !feedLoaded) {
+          loadFeedOnly().catch((err) => {
+            document.getElementById('feedList').innerHTML =
+              `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+          });
+        }
+        if (activeTab === 'recs' && !recsLoaded) {
+          loadRecommendations(false).catch((err) => {
+            document.getElementById('recommendList').innerHTML =
+              `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+          });
+        }
+      }
+
+      async function loadFeedOnly() {
+        const feedList = document.getElementById('feedList');
+        const feed = await api('/api/feed');
+        mountInteractivePosts(feedList, feed.posts, {
+          emptyText: "You're not following anyone yet. Find people in the For You tab!",
+          onFollow: async () => {
+            await loadFeedOnly();
+            feedLoaded = true;
+          },
+        });
+        feedLoaded = true;
+      }
+
+      async function fetchFreshRecommendations() {
+        markRecommendationIdsSeen(captureVisibleRecommendationIds());
+        refreshSeed = Date.now() + Math.floor(Math.random() * 1000000);
+        let recs = await api('/api/recommendations/refresh', {
+          method: 'POST',
+          body: JSON.stringify({
+            exclude: getSeenIds(),
+            seed: refreshSeed,
+          }),
+        });
+        if (recs.length === 0 && getSeenIds().length > 0) {
+          clearSeenRecommendations();
+          refreshSeed = Date.now() + Math.floor(Math.random() * 1000000);
+          recs = await api('/api/recommendations/refresh', {
+            method: 'POST',
+            body: JSON.stringify({ exclude: [], seed: refreshSeed }),
+          });
+        }
+        return recs;
+      }
+
+      async function loadRecommendations(refresh = false) {
+        const recommendList = document.getElementById('recommendList');
+
+        if (refresh) {
+          const recs = await fetchFreshRecommendations();
+
+          if (recs.length === 0) {
+            recommendList.innerHTML =
+              '<p class="post-meta">No new recommendations right now. Try Refresh again in a moment.</p>';
+            showEmptyHint('Use Refresh to load new posts when the pool updates.');
+          } else {
+            hideEmptyHint();
+            mountInteractivePosts(recommendList, recs, {
+              showFollow: true,
+              emptyText: 'No recommendations found.',
+              onFollow: async () => {
+                await loadFeedOnly();
+                feedLoaded = true;
+                switchTab('feed');
+              },
+            });
+            markRecommendationsSeen(recs);
+          }
+          recsLoaded = true;
+          return;
+        }
+
+        const recs = await api(`/api/recommendations?seed=${Date.now()}`);
+        hideEmptyHint();
+        mountInteractivePosts(recommendList, recs, {
+          showFollow: true,
+          emptyText: 'No recommendations found.',
+          onFollow: async () => {
+            await loadFeedOnly();
+            feedLoaded = true;
+            switchTab('feed');
+          },
+        });
+        markRecommendationsSeen(recs);
+        recsLoaded = true;
+      }
+
+      async function withButtonLoading(btn, label, fn) {
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = label;
+        try {
+          await fn();
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      }
+
+      document.getElementById('tabFeed').addEventListener('click', () => switchTab('feed'));
+      document.getElementById('tabRecs').addEventListener('click', () => switchTab('recs'));
+
+      document.getElementById('refreshFeedBtn').addEventListener('click', (e) => {
+        withButtonLoading(e.target, '...', () => loadFeedOnly());
+      });
+
+      document.getElementById('refreshRecsBtn').addEventListener('click', (e) => {
+        withButtonLoading(e.target, '...', () => loadRecommendations(true));
+      });
+
+      document.getElementById('postForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const alertBox = document.getElementById('postAlert');
+        const form = e.target;
+        const fd = new FormData();
+        fd.append('content', form.content.value.trim());
+        if (form.image.files[0]) {
+          fd.append('image', form.image.files[0]);
+        }
+
+        try {
+          await api('/api/posts', { method: 'POST', body: fd });
+          form.reset();
+          alertBox.textContent = 'Post published!';
+          alertBox.className = 'alert alert-success';
+          alertBox.classList.remove('hidden');
+          await loadFeedOnly();
+          feedLoaded = true;
+        } catch (err) {
+          alertBox.textContent = err.message;
+          alertBox.className = 'alert alert-error';
+          alertBox.classList.remove('hidden');
+        }
+      });
+
+      fetchMe().then(async (profile) => {
+        setUser({ id: profile.id, username: profile.username });
+
+        const isFirstVisit = !sessionStorage.getItem(FIRST_VISIT_KEY);
+        sessionStorage.setItem(FIRST_VISIT_KEY, '1');
+
+        const saved = sessionStorage.getItem(TAB_KEY);
+        const initialTab = saved || (isFirstVisit ? 'recs' : 'feed');
+        applyTabUI(initialTab);
+
+        await Promise.all([
+          loadFeedOnly().catch((err) => {
+            document.getElementById('feedList').innerHTML =
+              `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+          }),
+          loadRecommendations(false).catch((err) => {
+            document.getElementById('recommendList').innerHTML =
+              `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+          }),
+        ]);
+      });
+    </script>
+  </body>
+</html>

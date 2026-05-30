@@ -1,0 +1,41 @@
+{
+  "name": "social-network",
+  "version": "1.0.0",
+  "description": "CSE3044 Social Network Term Project",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "start:3001": "PORT=3001 node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "CI=true NODE_ENV=test jest --runInBand --forceExit",
+    "test:watch": "NODE_ENV=test jest --watch --runInBand",
+    "db:migrate": "prisma migrate deploy && prisma generate",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "node prisma/seed.js",
+    "db:check": "node scripts/check-db.js",
+    "setup": "docker compose up -d && npm run db:migrate && npm run db:seed",
+    "demo:seed": "node scripts/seed-demo.js --reset"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2",
+    "bcrypt": "^6.0.0",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "pg": "^8.21.0",
+    "prisma": "^6.8.2",
+    "supertest": "^7.1.1"
+  }
+}

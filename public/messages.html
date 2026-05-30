@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Messages - Social Network</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div id="nav-placeholder"></div>
+
+    <div class="container-wide">
+      <div class="card layout-2col">
+        <div>
+          <h2 style="margin-top: 0">Conversations</h2>
+          <ul class="conversation-list" id="convList">
+            <li class="post-meta">Loading...</li>
+          </ul>
+          <hr />
+          <h3 style="font-size: 1rem">New message</h3>
+          <form id="newConvForm">
+            <label for="recipientQuery">Username</label>
+            <input id="recipientQuery" type="text" placeholder="e.g. charlie" required />
+            <button type="submit" class="btn btn-secondary btn-sm" style="margin-top: 0.5rem">
+              Open chat
+            </button>
+          </form>
+        </div>
+
+        <div>
+          <h2 id="threadTitle" style="margin-top: 0">Select a conversation</h2>
+          <div class="message-thread" id="thread"></div>
+          <form id="sendForm" class="hidden">
+            <label for="messageText">Message</label>
+            <textarea id="messageText" maxlength="1000" required placeholder="Type your message..."></textarea>
+            <button type="submit" class="btn btn-primary">Send</button>
+          </form>
+          <div id="alert" class="alert hidden"></div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script>
+      requireAuth();
+      mountNav('messages');
+
+      const params = new URLSearchParams(window.location.search);
+      let activePartnerId = params.get('partner') ? Number(params.get('partner')) : null;
+      let activePartnerName = params.get('username') || null;
+
+      function showAlert(msg, type) {
+        const el = document.getElementById('alert');
+        el.textContent = msg;
+        el.className = `alert alert-${type}`;
+        el.classList.remove('hidden');
+      }
+
+      async function resolvePartner(partnerId, hintUsername) {
+        if (hintUsername) {
+          return hintUsername.replace(/^@/, '');
+        }
+        try {
+          const profile = await api(`/api/users/${partnerId}`);
+          return profile.username;
+        } catch {
+          return `user_${partnerId}`;
+        }
+      }
+
+      async function loadThread(partnerId, partnerName) {
+        activePartnerId = partnerId;
+        activePartnerName = partnerName || (await resolvePartner(partnerId, null));
+        document.getElementById('threadTitle').textContent = `@${activePartnerName}`;
+        document.getElementById('sendForm').classList.remove('hidden');
+        history.replaceState(
+          null,
+          '',
+          `?partner=${partnerId}&username=${encodeURIComponent(activePartnerName)}`
+        );
+
+        const messages = await api(`/api/messages/${partnerId}`);
+        const me = getUser();
+        const thread = document.getElementById('thread');
+
+        if (!messages.length) {
+          thread.innerHTML = `<p class="post-meta">No messages with @${escapeHtml(activePartnerName)} yet. Send the first one.</p>`;
+          return;
+        }
+
+        thread.innerHTML = messages
+          .map((m) => {
+            const mine = m.sender_id === me.id;
+            return `<div class="bubble ${mine ? 'mine' : 'theirs'}">${escapeHtml(m.content)}</div>`;
+          })
+          .join('');
+        thread.scrollTop = thread.scrollHeight;
+      }
+
+      async function loadConversations() {
+        const list = document.getElementById('convList');
+        const convs = await api('/api/messages');
+
+        if (!convs.length && !activePartnerId) {
+          list.innerHTML = '<li class="post-meta">No conversations yet.</li>';
+          return;
+        }
+
+        if (convs.length) {
+          list.innerHTML = convs
+            .map(
+              (c) => `
+            <li>
+              <button type="button" data-id="${c.partner_id}" data-name="${escapeHtml(c.partner_username)}"
+                class="${activePartnerId === c.partner_id ? 'active' : ''}">
+                @${escapeHtml(c.partner_username)}
+                <span class="preview">${escapeHtml(c.last_message)}</span>
+              </button>
+            </li>
+          `
+            )
+            .join('');
+
+          list.querySelectorAll('button[data-id]').forEach((btn) => {
+            btn.onclick = () => {
+              list.querySelectorAll('button').forEach((b) => b.classList.remove('active'));
+              btn.classList.add('active');
+              loadThread(Number(btn.dataset.id), btn.dataset.name);
+            };
+          });
+        } else {
+          list.innerHTML = '<li class="post-meta">No conversations yet.</li>';
+        }
+
+        if (activePartnerId) {
+          const inList = convs.find((c) => c.partner_id === activePartnerId);
+          const name = inList?.partner_username || activePartnerName;
+          await loadThread(activePartnerId, name);
+        } else if (convs.length) {
+          await loadThread(convs[0].partner_id, convs[0].partner_username);
+        }
+      }
+
+      document.getElementById('sendForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!activePartnerId) return;
+        const content = document.getElementById('messageText').value.trim();
+        try {
+          await api('/api/messages', {
+            method: 'POST',
+            body: JSON.stringify({ recipient_id: activePartnerId, content }),
+          });
+          document.getElementById('messageText').value = '';
+          await loadConversations();
+        } catch (err) {
+          showAlert(err.message, 'error');
+        }
+      });
+
+      document.getElementById('newConvForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const query = document.getElementById('recipientQuery').value.trim().replace(/^@/, '');
+        try {
+          const profile = await api(`/api/users/${encodeURIComponent(query)}`);
+          await loadThread(profile.id, profile.username);
+        } catch {
+          showAlert('User not found.', 'error');
+        }
+      });
+
+      fetchMe()
+        .then(loadConversations)
+        .catch((err) => showAlert(err.message, 'error'));
+    </script>
+  </body>
+</html>

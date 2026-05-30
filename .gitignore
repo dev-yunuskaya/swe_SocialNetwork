@@ -1,0 +1,9 @@
+node_modules/
+uploads/
+uploads-test/
+pgdata/
+.env
+.env.test
+coverage/
+*.log
+.DS_Store

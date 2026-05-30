@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Notifications - Social Network</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div id="nav-placeholder"></div>
+
+    <div class="container-wide">
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <h1 style="margin: 0">Notifications</h1>
+          <button type="button" class="btn btn-secondary btn-sm" id="markAllBtn">
+            Mark all as read
+          </button>
+        </div>
+        <div id="list" style="margin-top: 1rem">
+          <p class="post-meta">Loading...</p>
+        </div>
+      </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script>
+      requireAuth();
+      mountNav('notifications');
+
+      const TYPE_LABELS = {
+        new_follower: 'started following you',
+        post_liked: 'liked your post',
+        post_commented: 'commented on your post',
+        comment_replied: 'replied to your comment',
+      };
+
+      async function loadNotifications() {
+        const list = document.getElementById('list');
+        const items = await api('/api/notifications');
+
+        if (!items.length) {
+          list.innerHTML = '<p class="post-meta">No notifications.</p>';
+          return;
+        }
+
+        list.innerHTML = items
+          .map((n) => {
+            const label = TYPE_LABELS[n.type] || n.type;
+            const postLink = n.post_id
+              ? `<a href="/post.html?id=${n.post_id}">View post</a>`
+              : '';
+            return `
+              <div class="notification-item ${n.is_read ? '' : 'unread'}">
+                <div>
+                  <strong>@${escapeHtml(n.actor_username)}</strong> ${label}
+                  <div class="post-meta">${formatDate(n.created_at)} ${postLink}</div>
+                </div>
+                ${
+                  !n.is_read
+                    ? `<button type="button" class="btn btn-secondary btn-sm" data-id="${n.id}">Mark read</button>`
+                    : ''
+                }
+              </div>
+            `;
+          })
+          .join('');
+
+        list.querySelectorAll('button[data-id]').forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/api/notifications/${btn.dataset.id}/read`, { method: 'PATCH' });
+            loadNotifications();
+          };
+        });
+      }
+
+      document.getElementById('markAllBtn').onclick = async () => {
+        await api('/api/notifications/all/read', { method: 'PATCH' });
+        loadNotifications();
+      };
+
+      loadNotifications().catch((err) => {
+        document.getElementById('list').innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+      });
+    </script>
+  </body>
+</html>

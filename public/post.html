@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Post - Social Network</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div id="nav-placeholder"></div>
+
+    <div class="container-wide">
+      <p><a href="/feed.html">&larr; Back to feed</a></p>
+      <div id="alert" class="alert hidden"></div>
+      <div id="postContainer" class="card"><p class="post-meta">Loading...</p></div>
+
+      <div class="card" style="margin-top: 1rem">
+        <h2 style="margin-top: 0">Comments</h2>
+        <div id="commentsList"></div>
+        <form id="commentForm" style="margin-top: 1rem">
+          <label for="commentText">Write a comment</label>
+          <textarea id="commentText" maxlength="300" required></textarea>
+          <button type="submit" class="btn btn-primary">Post</button>
+        </form>
+      </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script>
+      requireAuth();
+      mountNav('feed');
+
+      const postId = new URLSearchParams(window.location.search).get('id');
+      if (!postId) {
+        window.location.href = '/feed.html';
+      }
+
+      const me = getUser();
+      let currentPost = null;
+
+      function showAlert(msg, type) {
+        const el = document.getElementById('alert');
+        el.textContent = msg;
+        el.className = `alert alert-${type}`;
+        el.classList.remove('hidden');
+      }
+
+      function renderComments(comments) {
+        const list = document.getElementById('commentsList');
+        if (!comments.length) {
+          list.innerHTML = '<p class="post-meta">No comments yet.</p>';
+          return;
+        }
+        list.innerHTML = comments
+          .map((c) => {
+            const canDelete = me && c.user.id === me.id;
+            const isReply = Boolean(c.parent_id);
+            return `
+              <div class="post-card" style="margin-bottom:0.5rem;${isReply ? 'margin-left:1.25rem;border-left:3px solid var(--border)' : ''}">
+                <div class="post-meta">@${escapeHtml(c.user.username)} · ${formatDate(c.created_at)}${isReply ? ' · reply' : ''}</div>
+                <p>${escapeHtml(c.content)}</p>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                  <button type="button" class="btn btn-secondary btn-sm" data-reply="${c.id}">Reply</button>
+                  ${canDelete ? `<button type="button" class="btn btn-secondary btn-sm" data-id="${c.id}">Delete</button>` : ''}
+                </div>
+                <form class="reply-form hidden" data-reply-form="${c.id}" style="margin-top:0.5rem">
+                  <textarea maxlength="300" required placeholder="Write a reply..." rows="2"></textarea>
+                  <button type="submit" class="btn btn-primary btn-sm">Post</button>
+                </form>
+              </div>
+            `;
+          })
+          .join('');
+
+        list.querySelectorAll('button[data-id]').forEach((btn) => {
+          btn.onclick = async () => {
+            await api(`/api/comments/${btn.dataset.id}`, { method: 'DELETE' });
+            loadPost();
+          };
+        });
+
+        list.querySelectorAll('button[data-reply]').forEach((btn) => {
+          btn.onclick = () => {
+            const form = list.querySelector(`[data-reply-form="${btn.dataset.reply}"]`);
+            form?.classList.toggle('hidden');
+          };
+        });
+
+        list.querySelectorAll('.reply-form').forEach((form) => {
+          form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const parentId = form.dataset.replyForm;
+            const text = form.querySelector('textarea').value.trim();
+            if (!text) return;
+            await api(`/api/posts/${postId}/comments`, {
+              method: 'POST',
+              body: JSON.stringify({ content: text, parent_comment_id: Number(parentId) }),
+            });
+            loadPost();
+          });
+        });
+      }
+
+      async function loadPost() {
+        currentPost = await api(`/api/posts/${postId}`);
+        const img = currentPost.image_path
+          ? `<img src="${imageUrl(currentPost.image_path)}" alt="Post image" />`
+          : '';
+
+        const isAuthor = me && currentPost.author_id === me.id;
+
+        document.getElementById('postContainer').innerHTML = `
+          <div class="post-meta">@${escapeHtml(currentPost.author.username)} · ${formatDate(currentPost.created_at)}</div>
+          <p>${escapeHtml(currentPost.content)}</p>
+          ${img}
+          <p class="post-meta">${currentPost.like_count} likes · ${currentPost.comment_count} comments</p>
+          <div class="profile-actions">
+            <button type="button" class="btn btn-primary btn-sm" id="likeBtn">
+              ${currentPost.liked_by_me ? 'Unlike' : 'Like'}
+            </button>
+            ${isAuthor ? `<button type="button" class="btn btn-secondary btn-sm" id="deleteBtn">Delete post</button>` : ''}
+          </div>
+        `;
+
+        document.getElementById('likeBtn').onclick = async () => {
+          if (currentPost.liked_by_me) {
+            await api(`/api/posts/${postId}/like`, { method: 'DELETE' });
+          } else {
+            try {
+              await api(`/api/posts/${postId}/like`, { method: 'POST' });
+            } catch (err) {
+              if (!err.message.includes('Already')) throw err;
+            }
+          }
+          loadPost();
+        };
+
+        if (isAuthor) {
+          document.getElementById('deleteBtn').onclick = async () => {
+            if (!confirm('Delete this post?')) return;
+            await api(`/api/posts/${postId}`, { method: 'DELETE' });
+            window.location.href = '/feed.html';
+          };
+        }
+
+        renderComments(currentPost.comments);
+      }
+
+      document.getElementById('commentForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const text = document.getElementById('commentText').value.trim();
+        try {
+          await api(`/api/posts/${postId}/comments`, {
+            method: 'POST',
+            body: JSON.stringify({ content: text }),
+          });
+          document.getElementById('commentText').value = '';
+          loadPost();
+        } catch (err) {
+          showAlert(err.message, 'error');
+        }
+      });
+
+      fetchMe()
+        .then(loadPost)
+        .catch((err) => showAlert(err.message, 'error'));
+    </script>
+  </body>
+</html>

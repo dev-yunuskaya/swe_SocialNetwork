@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profile - Social Network</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div id="nav-placeholder"></div>
+
+    <div class="container-wide">
+      <div id="alert" class="alert hidden"></div>
+
+      <div class="card" id="profileView">
+        <p class="post-meta">Loading...</p>
+      </div>
+
+      <div class="card hidden" id="editCard">
+        <h2 style="margin-top: 0">Edit profile</h2>
+        <form id="editForm">
+          <label for="display_name">Display name</label>
+          <input id="display_name" name="display_name" type="text" />
+
+          <label for="bio">Bio</label>
+          <textarea id="bio" name="bio" maxlength="300"></textarea>
+
+          <p><strong>Interests</strong></p>
+          <div class="interests" id="interestBoxes"></div>
+
+          <button type="submit" class="btn btn-primary">Save</button>
+        </form>
+      </div>
+
+      <h2 class="section-title">Posts</h2>
+      <div id="userPosts"></div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/posts.js"></script>
+    <script>
+      requireAuth();
+      mountNav('profile');
+
+      const params = new URLSearchParams(window.location.search);
+      const viewUser = params.get('user') || params.get('username');
+
+      const INTERESTS = [
+        'Technology',
+        'Sports',
+        'Music',
+        'Art',
+        'Science',
+        'Travel',
+        'Food',
+        'Gaming',
+      ];
+      const interestBoxes = document.getElementById('interestBoxes');
+      INTERESTS.forEach((name) => {
+        interestBoxes.innerHTML += `
+          <label><input type="checkbox" name="interests" value="${name}" /> ${name}</label>
+        `;
+      });
+
+      function showAlert(msg, type) {
+        const el = document.getElementById('alert');
+        el.textContent = msg;
+        el.className = `alert alert-${type}`;
+        el.classList.remove('hidden');
+      }
+
+      async function toggleFollow(userId, isFollowing) {
+        if (isFollowing) {
+          await api(`/api/users/${userId}/follow`, { method: 'DELETE' });
+        } else {
+          await api(`/api/users/${userId}/follow`, { method: 'POST' });
+        }
+        loadProfile();
+      }
+
+      function renderProfile(p) {
+        const view = document.getElementById('profileView');
+        const name = p.display_name || p.username;
+        const actions = p.is_self
+          ? ''
+          : `<div class="profile-actions">
+              <button type="button" class="btn btn-primary btn-sm" id="followBtn">
+                ${p.is_following ? 'Unfollow' : 'Follow'}
+              </button>
+              <a class="btn btn-secondary btn-sm" href="/messages.html?partner=${p.id}&username=${encodeURIComponent(p.username)}">Message</a>
+            </div>`;
+
+        view.innerHTML = `
+          <h1 style="margin:0">
+            <a href="${profileUrl(p.username)}" style="color:inherit">@${escapeHtml(p.username)}</a>
+          </h1>
+          <p style="margin:0.25rem 0 0">${escapeHtml(name)}</p>
+          <p class="post-meta">${escapeHtml(p.bio || 'No bio yet')}</p>
+          <div class="profile-stats">
+            <span><strong>${p.post_count}</strong> posts</span>
+            <span><strong>${p.follower_count}</strong> followers</span>
+            <span><strong>${p.following_count}</strong> following</span>
+          </div>
+          <p class="post-meta">Interests: ${p.interests.map(escapeHtml).join(', ')}</p>
+          ${actions}
+        `;
+
+        if (!p.is_self) {
+          document.getElementById('followBtn').onclick = () => toggleFollow(p.id, p.is_following);
+        }
+
+        document.getElementById('editCard').classList.toggle('hidden', !p.is_self);
+        if (p.is_self) {
+          document.getElementById('display_name').value = p.display_name || '';
+          document.getElementById('bio').value = p.bio || '';
+          interestBoxes.querySelectorAll('input').forEach((input) => {
+            input.checked = p.interests.includes(input.value);
+          });
+        }
+      }
+
+      async function loadPosts(userId) {
+        const container = document.getElementById('userPosts');
+        try {
+          const posts = await api(`/api/users/${userId}/posts`);
+          mountInteractivePosts(container, posts, {
+            emptyText: 'No posts yet.',
+          });
+        } catch (err) {
+          container.innerHTML = `<p class="alert alert-error">${escapeHtml(err.message)}</p>`;
+        }
+      }
+
+      async function loadProfile() {
+        const path = viewUser ? `/api/users/${viewUser}` : '/api/me';
+        const profile = await api(path);
+        renderProfile(profile);
+        await loadPosts(profile.id);
+        setUser({ id: profile.id, username: profile.username });
+      }
+
+      document.getElementById('editForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const interests = [...e.target.querySelectorAll('input[name="interests"]:checked')].map(
+          (el) => el.value
+        );
+        try {
+          await api('/api/profile', {
+            method: 'PUT',
+            body: JSON.stringify({
+              display_name: e.target.display_name.value.trim() || null,
+              bio: e.target.bio.value.trim() || null,
+              interests,
+            }),
+          });
+          showAlert('Profile updated.', 'success');
+          loadProfile();
+        } catch (err) {
+          showAlert(err.message, 'error');
+        }
+      });
+
+      loadProfile().catch((err) => showAlert(err.message, 'error'));
+    </script>
+  </body>
+</html>

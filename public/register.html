@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign up - Social Network</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>Sign up</h1>
+        <p class="subtitle">Create an account and choose your interests.</p>
+        <div id="alert" class="alert hidden"></div>
+
+        <form id="registerForm">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" minlength="3" maxlength="30" required />
+
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required />
+
+          <label for="password">Password (min. 8 characters)</label>
+          <input id="password" name="password" type="password" minlength="8" required />
+
+          <p><strong>Interests</strong> (at least 1)</p>
+          <div class="interests">
+            <label><input type="checkbox" name="interests" value="Technology" /> Technology</label>
+            <label><input type="checkbox" name="interests" value="Sports" /> Sports</label>
+            <label><input type="checkbox" name="interests" value="Music" /> Music</label>
+            <label><input type="checkbox" name="interests" value="Art" /> Art</label>
+            <label><input type="checkbox" name="interests" value="Science" /> Science</label>
+            <label><input type="checkbox" name="interests" value="Travel" /> Travel</label>
+            <label><input type="checkbox" name="interests" value="Food" /> Food</label>
+            <label><input type="checkbox" name="interests" value="Gaming" /> Gaming</label>
+          </div>
+
+          <button type="submit" class="btn btn-primary">Sign up</button>
+        </form>
+
+        <p style="margin-top: 1rem; text-align: center">
+          Already have an account? <a href="/login.html">Log in</a>
+        </p>
+      </div>
+    </div>
+
+    <script src="/js/api.js"></script>
+    <script>
+      const form = document.getElementById('registerForm');
+      const alertBox = document.getElementById('alert');
+
+      function showAlert(message, type) {
+        alertBox.textContent = message;
+        alertBox.className = `alert alert-${type}`;
+        alertBox.classList.remove('hidden');
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const interests = [...form.querySelectorAll('input[name="interests"]:checked')].map(
+          (el) => el.value
+        );
+
+        try {
+          await api('/api/register', {
+            method: 'POST',
+            body: JSON.stringify({
+              username: form.username.value.trim(),
+              email: form.email.value.trim(),
+              password: form.password.value,
+              interests,
+            }),
+          });
+          showAlert('Registration successful! Redirecting to log in...', 'success');
+          setTimeout(() => {
+            window.location.href = '/login.html';
+          }, 1500);
+        } catch (err) {
+          showAlert(err.message, 'error');
+        }
+      });
+    </script>
+  </body>
+</html>
